@@ -100,6 +100,20 @@ class AdResolverContractTest extends TestCase
         $this->assertSame('default.route.home.native.after_quick_access', $contract['tabs']['home.native.after_quick_access']['source']);
     }
 
+    public function test_default_route_policy_keys_are_canonical_and_colon_free(): void
+    {
+        $defaults = AdResolver::defaultRoutePlacementPolicies();
+
+        foreach (array_keys($defaults) as $key) {
+            $this->assertStringNotContainsString(':', $key);
+        }
+
+        $this->assertArrayHasKey('explore.games', $defaults);
+        $this->assertArrayHasKey('explore.games.dominion_match', $defaults);
+        $this->assertArrayHasKey('game.future_games', $defaults);
+        $this->assertArrayHasKey('quiz', $defaults);
+    }
+
     public function test_stored_route_policy_overrides_route_default(): void
     {
         $contract = $this->resolve([], [

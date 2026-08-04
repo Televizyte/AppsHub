@@ -107,12 +107,6 @@ class AdResolver
             'notification.open' => ['enabled' => true, 'banner' => false, 'native' => false, 'interstitial' => true, 'safe' => 'recommended'],
             'notification.action.open' => ['enabled' => true, 'banner' => false, 'native' => false, 'interstitial' => true, 'safe' => 'recommended'],
 
-            // Explore game surfaces
-            'explore:games' => ['enabled' => true, 'banner' => true, 'native' => true, 'interstitial' => false, 'safe' => 'medium'],
-            'explore:dominion_match' => ['enabled' => true, 'banner' => true, 'native' => true, 'interstitial' => false, 'safe' => 'medium'],
-            'explore:future_games' => ['enabled' => true, 'banner' => true, 'native' => true, 'interstitial' => false, 'safe' => 'medium'],
-            'explore:quiz' => ['enabled' => true, 'banner' => true, 'native' => true, 'interstitial' => false, 'safe' => 'medium'],
-
             // Generic game engine scopes used by standalone game screens.
             'game' => ['enabled' => true, 'banner' => true, 'native' => true, 'interstitial' => false, 'safe' => 'medium'],
             'game.race_of_faith' => ['enabled' => true, 'banner' => true, 'native' => true, 'interstitial' => true, 'safe' => 'medium'],
