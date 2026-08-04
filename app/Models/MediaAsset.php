@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Storage;
 
 class MediaAsset extends Model
@@ -35,6 +36,16 @@ class MediaAsset extends Model
         'height' => 'integer',
         'app_id' => 'integer',
     ];
+
+    public function videos(): HasMany
+    {
+        return $this->hasMany(Video::class, 'media_asset_id');
+    }
+
+    public function videoThumbnails(): HasMany
+    {
+        return $this->hasMany(Video::class, 'thumbnail_media_asset_id');
+    }
 
     /**
      * IMPORTANT SAFETY NOTE:

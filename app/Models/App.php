@@ -77,6 +77,21 @@ class App extends Model
         return $this->hasMany(WatchLink::class, 'app_id');
     }
 
+    public function videoChannels(): HasMany
+    {
+        return $this->hasMany(VideoChannel::class, 'app_id');
+    }
+
+    public function videoPlaylists(): HasMany
+    {
+        return $this->hasMany(VideoPlaylist::class, 'app_id');
+    }
+
+    public function videos(): HasMany
+    {
+        return $this->hasMany(Video::class, 'app_id');
+    }
+
     public function pushNotifications(): HasMany
     {
         return $this->hasMany(PushNotification::class, 'app_id');
