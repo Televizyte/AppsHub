@@ -158,8 +158,6 @@ class AdResolver
             'more.rate' => ['enabled' => true, 'banner' => false, 'native' => false, 'interstitial' => true, 'safe' => 'recommended'],
             'more.share' => ['enabled' => true, 'banner' => false, 'native' => false, 'interstitial' => true, 'safe' => 'recommended'],
             'more.item.open' => ['enabled' => true, 'banner' => false, 'native' => false, 'interstitial' => true, 'safe' => 'recommended'],
-            'notification.open' => ['enabled' => true, 'banner' => false, 'native' => false, 'interstitial' => true, 'safe' => 'recommended'],
-            'notification.action.open' => ['enabled' => true, 'banner' => false, 'native' => false, 'interstitial' => true, 'safe' => 'recommended'],
             'saved.item.open' => ['enabled' => true, 'banner' => false, 'native' => false, 'interstitial' => true, 'safe' => 'recommended'],
             'saved.item.share' => ['enabled' => true, 'banner' => false, 'native' => false, 'interstitial' => true, 'safe' => 'recommended'],
             'download.item.open' => ['enabled' => true, 'banner' => false, 'native' => false, 'interstitial' => true, 'safe' => 'recommended'],
@@ -438,24 +436,6 @@ class AdResolver
     public static function globalInterstitialForApp(int $appId): array
     {
         return self::adsForApp($appId)['interstitial'];
-
-        $meta = DB::table('ad_profiles')
-            ->where('app_id', $appId)
-            ->value('meta_json');
-
-        $decoded = self::decodeJsonArray($meta);
-        $defaults = self::defaultInterstitial();
-        $configured = is_array($decoded['interstitial'] ?? null)
-            ? $decoded['interstitial']
-            : [];
-
-        return [
-            'cooldown_seconds' => max(1, (int) ($configured['cooldown_seconds'] ?? $defaults['cooldown_seconds'])),
-            'every_n_safe_actions' => max(1, (int) ($configured['every_n_safe_actions'] ?? $defaults['every_n_safe_actions'])),
-            'minimum_launch_delay_seconds' => max(0, (int) ($configured['minimum_launch_delay_seconds'] ?? $defaults['minimum_launch_delay_seconds'])),
-            'maximum_per_session' => max(0, (int) ($configured['maximum_per_session'] ?? $defaults['maximum_per_session'])),
-            'minimum_page_dwell_seconds' => max(0, (int) ($configured['minimum_page_dwell_seconds'] ?? $defaults['minimum_page_dwell_seconds'])),
-        ];
     }
 
     /**
@@ -471,193 +451,7 @@ class AdResolver
     {
         return self::adsForApp($appId)['tabs'];
 
-        $profileMeta = self::decodeJsonArray(
-            DB::table('ad_profiles')->where('app_id', $appId)->value('meta_json')
-        );
-        $profile = self::metaOverrides($profileMeta);
-        $globalFormats = $profile['ad_formats'];
-        $globalNative = $profile['native_in_list'];
-        $globalInterstitial = $profile['interstitial'];
 
-        $makePolicy = static function (
-            string $key,
-            bool $enabled,
-            bool $banner,
-            bool $native,
-            bool $interstitial,
-            string $source,
-            array $settings = []
-        ) use ($globalFormats, $globalNative, $globalInterstitial): array {
-            $bannerSettings = array_merge([
-                'placement' => str_contains($key, '.') ? 'page_bottom' : 'shell_bottom',
-                'hide_on_failure' => true,
-                'reserve_space_before_load' => false,
-            ], is_array($settings['banner'] ?? null) ? $settings['banner'] : []);
-
-            $nativeSettings = array_merge(
-                $globalNative,
-                is_array($settings['native'] ?? null) ? $settings['native'] : []
-            );
-            $interstitialSettings = array_merge(
-                $globalInterstitial,
-                is_array($settings['interstitial'] ?? null) ? $settings['interstitial'] : []
-            );
-
-            $banner = $banner && (bool) ($globalFormats['banner'] ?? false);
-            $native = $native && (bool) ($globalFormats['native'] ?? false);
-            $interstitial = $interstitial && (bool) ($globalFormats['interstitial'] ?? false);
-
-            if (! $enabled) {
-                $banner = $native = $interstitial = false;
-            }
-
-            return [
-                'enabled' => $enabled,
-                'banner' => $banner,
-                'native' => $native,
-                'interstitial' => $interstitial,
-                'banner_config' => $bannerSettings,
-                'native_config' => $nativeSettings,
-                'interstitial_config' => $interstitialSettings,
-                'cooldown' => (int) ($interstitialSettings['cooldown_seconds'] ?? 120),
-                'source' => $source,
-                'scope_key' => $key,
-            ];
-        };
-
-        $rules = DB::table('ad_rules')
-            ->where('app_id', $appId)
-            ->whereIn('scope_type', ['tab', 'route'])
-            ->orderBy('id')
-            ->get();
-
-        $tabRules = [];
-        $routeRules = [];
-
-        foreach ($rules as $rule) {
-            $key = self::canonicalKey((string) $rule->scope_key);
-            if ($key === null) {
-                continue; // Legacy colon-style hierarchy is intentionally ignored.
-            }
-
-            if ((string) $rule->scope_type === 'tab' && in_array($key, self::mainTabs(), true)) {
-                $tabRules[$key] = $rule;
-                continue;
-            }
-
-            if ((string) $rule->scope_type === 'route') {
-                $routeRules[$key] = $rule;
-            }
-        }
-
-        $policies = [];
-
-        // Main tabs are the authoritative parent controls. Their format switches
-        // always apply; global profile switches still act as an app-wide gate.
-        foreach (self::mainTabs() as $tab) {
-            $rule = $tabRules[$tab] ?? null;
-            if ($rule !== null) {
-                $settings = self::decodeJsonArray($rule->settings_json ?? null);
-                $policies[$tab] = $makePolicy(
-                    $tab,
-                    (bool) $rule->is_enabled,
-                    (bool) $rule->banner_enabled,
-                    (bool) $rule->native_enabled,
-                    (bool) $rule->interstitial_enabled,
-                    'ad_rules.tab.' . $tab,
-                    $settings
-                );
-            } else {
-                $enabled = (bool) (self::defaultTabPolicy()[$tab] ?? false);
-                $policies[$tab] = $makePolicy(
-                    $tab,
-                    $enabled,
-                    $enabled,
-                    $enabled,
-                    false,
-                    'default.tab.' . $tab
-                );
-            }
-        }
-
-        // All canonical child pages/actions inherit from their parent tab unless
-        // settings_json contains an explicit override marker for that format.
-        foreach ($routeRules as $key => $rule) {
-            $parentTab = self::parentTabForKey($key);
-            if ($parentTab === null || ! isset($policies[$parentTab])) {
-                continue;
-            }
-
-            $parent = $policies[$parentTab];
-            $settings = self::decodeJsonArray($rule->settings_json ?? null);
-            $override = is_array($settings['override'] ?? null) ? $settings['override'] : [];
-
-            $enabled = (bool) $parent['enabled'];
-            $banner = (bool) $parent['banner'];
-            $native = (bool) $parent['native'];
-            $interstitial = (bool) $parent['interstitial'];
-            $sources = [
-                'enabled' => $parent['source'],
-                'banner' => $parent['source'],
-                'native' => $parent['source'],
-                'interstitial' => $parent['source'],
-            ];
-
-            if (($override['placement'] ?? false) === true) {
-                $enabled = (bool) $rule->is_enabled;
-                $sources['enabled'] = 'ad_rules.route.' . $key;
-            }
-            if (($override['banner'] ?? false) === true) {
-                $banner = (bool) $rule->banner_enabled;
-                $sources['banner'] = 'ad_rules.route.' . $key;
-            }
-            if (($override['native'] ?? false) === true) {
-                $native = (bool) $rule->native_enabled;
-                $sources['native'] = 'ad_rules.route.' . $key;
-            }
-            if (($override['interstitial'] ?? false) === true) {
-                $interstitial = (bool) $rule->interstitial_enabled;
-                $sources['interstitial'] = 'ad_rules.route.' . $key;
-            }
-
-            $policy = $makePolicy(
-                $key,
-                $enabled,
-                $banner,
-                $native,
-                $interstitial,
-                'inherited.' . $parentTab,
-                $settings
-            );
-            $policy['parent_key'] = $parentTab;
-            $policy['sources'] = $sources;
-            $policy['inheritance'] = [
-                'placement' => ! (($override['placement'] ?? false) === true),
-                'banner' => ! (($override['banner'] ?? false) === true),
-                'native' => ! (($override['native'] ?? false) === true),
-                'interstitial' => ! (($override['interstitial'] ?? false) === true),
-            ];
-
-            if (self::isProtectedKey($key)) {
-                $policy['enabled'] = true;
-                $policy['banner'] = false;
-                $policy['native'] = false;
-                $policy['interstitial'] = false;
-                $policy['banner_config']['placement'] = 'disabled';
-                $policy['source'] = 'safety.protected';
-                $policy['sources'] = [
-                    'enabled' => 'safety.protected',
-                    'banner' => 'safety.protected',
-                    'native' => 'safety.protected',
-                    'interstitial' => 'safety.protected',
-                ];
-                $policy['protected'] = true;
-            }
-
-            $policies[$key] = $policy;
-        }
-
-        return $policies;
     }
 
     /**
@@ -665,7 +459,12 @@ class AdResolver
      */
     public static function screenAdsForApp(int $appId, string $tabKey, ?string $routeKey): array
     {
-        $policies = self::tabsAdsForApp($appId);
+        return self::resolveScreenContract(self::tabsAdsForApp($appId), $tabKey, $routeKey);
+    }
+
+    /** Side-effect-free screen resolver used by focused contract tests. */
+    public static function resolveScreenContract(array $policies, string $tabKey, ?string $routeKey): array
+    {
         $tabKey = strtolower(trim($tabKey));
         $routeKey = self::canonicalKey((string) $routeKey);
 

@@ -114,6 +114,47 @@ class AdResolverContractTest extends TestCase
         $this->assertArrayHasKey('quiz', $defaults);
     }
 
+    public function test_default_route_policy_literals_are_unique(): void
+    {
+        preg_match_all("/^ {12}'([^']+)'\\s*=>/m", $this->methodSource('defaultRoutePlacementPolicies'), $matches);
+
+        $this->assertNotEmpty($matches[1]);
+        $this->assertSame($matches[1], array_values(array_unique($matches[1])));
+    }
+
+    public function test_public_ad_wrappers_preserve_canonical_array_returns(): void
+    {
+        $global = new \ReflectionMethod(AdResolver::class, 'globalInterstitialForApp');
+        $tabs = new \ReflectionMethod(AdResolver::class, 'tabsAdsForApp');
+
+        $this->assertSame('array', (string) $global->getReturnType());
+        $this->assertSame('array', (string) $tabs->getReturnType());
+        $this->assertStringContainsString(
+            "return self::adsForApp(\$appId)['interstitial'];",
+            $this->methodSource('globalInterstitialForApp')
+        );
+        $this->assertStringContainsString(
+            "return self::adsForApp(\$appId)['tabs'];",
+            $this->methodSource('tabsAdsForApp')
+        );
+    }
+
+    public function test_side_effect_free_screen_resolver_keeps_exact_and_protected_behavior(): void
+    {
+        $policies = $this->resolve()['tabs'];
+
+        $exact = AdResolver::resolveScreenContract($policies, 'home', 'home.native.after_quick_access');
+        $this->assertSame('home.native.after_quick_access', $exact['resolved_key']);
+        $this->assertTrue($exact['native']);
+
+        $protected = AdResolver::resolveScreenContract($policies, 'watch', 'watch.player.live');
+        $this->assertSame('watch.player.live', $protected['resolved_key']);
+        $this->assertTrue($protected['protected']);
+        $this->assertFalse($protected['banner']);
+        $this->assertFalse($protected['native']);
+        $this->assertFalse($protected['interstitial']);
+    }
+
     public function test_stored_route_policy_overrides_route_default(): void
     {
         $contract = $this->resolve([], [
@@ -210,6 +251,18 @@ class AdResolverContractTest extends TestCase
     private function resolve(array $profile = [], array $rules = []): array
     {
         return AdResolver::resolveContract(array_merge(['ads_enabled' => true], $profile), $rules);
+    }
+
+    private function methodSource(string $method): string
+    {
+        $reflection = new \ReflectionMethod(AdResolver::class, $method);
+        $lines = file($reflection->getFileName());
+
+        return implode('', array_slice(
+            $lines,
+            $reflection->getStartLine() - 1,
+            $reflection->getEndLine() - $reflection->getStartLine() + 1
+        ));
     }
 
     private function rule(
