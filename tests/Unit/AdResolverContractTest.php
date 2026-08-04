@@ -7,6 +7,84 @@ use PHPUnit\Framework\TestCase;
 
 class AdResolverContractTest extends TestCase
 {
+    public function test_genuinely_missing_profile_fails_closed_across_canonical_contract(): void
+    {
+        $contract = AdResolver::resolveContract([], []);
+
+        foreach (['enabled', 'formats', 'units', 'tabs', 'native_in_list', 'interstitial'] as $key) {
+            $this->assertArrayHasKey($key, $contract);
+        }
+
+        $this->assertFalse($contract['enabled']);
+        $this->assertSame([
+            'banner' => false,
+            'native' => false,
+            'interstitial' => false,
+        ], $contract['formats']);
+        $this->assertSame([
+            'banner' => null,
+            'native' => null,
+            'interstitial' => null,
+        ], $contract['units']);
+        $this->assertFalse($contract['native_in_list']['enabled']);
+
+        foreach ($contract['tabs'] as $policy) {
+            $this->assertFalse($policy['banner']);
+            $this->assertFalse($policy['native']);
+            $this->assertFalse($policy['interstitial']);
+            $this->assertSame('disabled', $policy['banner_config']['placement']);
+            $this->assertFalse($policy['native_config']['enabled']);
+            $this->assertFalse($policy['interstitial_config']['enabled']);
+        }
+
+        foreach (['watch.player.live', 'webview.active', 'form.active', 'authentication.active'] as $key) {
+            $this->assertArrayHasKey($key, $contract['tabs']);
+            $this->assertTrue($contract['tabs'][$key]['protected']);
+        }
+    }
+
+    public function test_missing_profile_gate_cannot_be_bypassed_by_enabled_rules(): void
+    {
+        $contract = AdResolver::resolveContract([], [
+            $this->rule(1, 'tab', 'home', true, true, true, true),
+            $this->rule(2, 'route', 'home.action.articles', true, true, true, true, $this->allOverrides()),
+        ]);
+
+        foreach (['home', 'home.action.articles'] as $key) {
+            $this->assertFalse($contract['tabs'][$key]['banner']);
+            $this->assertFalse($contract['tabs'][$key]['native']);
+            $this->assertFalse($contract['tabs'][$key]['interstitial']);
+            $this->assertFalse($contract['tabs'][$key]['native_config']['enabled']);
+            $this->assertFalse($contract['tabs'][$key]['interstitial_config']['enabled']);
+        }
+    }
+
+    public function test_existing_enabled_profile_preserves_enabled_defaults(): void
+    {
+        $contract = AdResolver::resolveContract(['ads_enabled' => true], []);
+
+        $this->assertTrue($contract['enabled']);
+        $this->assertSame([
+            'banner' => true,
+            'native' => true,
+            'interstitial' => true,
+        ], $contract['formats']);
+        $this->assertTrue($contract['tabs']['home']['banner']);
+        $this->assertTrue($contract['tabs']['home']['native']);
+    }
+
+    public function test_existing_disabled_profile_remains_disabled(): void
+    {
+        $contract = AdResolver::resolveContract(['ads_enabled' => false], []);
+
+        $this->assertFalse($contract['enabled']);
+        $this->assertSame([
+            'banner' => false,
+            'native' => false,
+            'interstitial' => false,
+        ], $contract['formats']);
+    }
+
     public function test_master_switch_blocks_every_tab_and_route(): void
     {
         $contract = $this->resolve(['ads_enabled' => false], [

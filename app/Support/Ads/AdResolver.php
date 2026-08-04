@@ -212,9 +212,10 @@ class AdResolver
     /** Side-effect-free resolver used by the API and focused contract tests. */
     public static function resolveContract(array $profileRow, iterable $ruleRows): array
     {
-        $masterEnabled = array_key_exists('ads_enabled', $profileRow)
+        $profileExists = $profileRow !== [];
+        $masterEnabled = $profileExists && (array_key_exists('ads_enabled', $profileRow)
             ? (bool) $profileRow['ads_enabled']
-            : true;
+            : true);
         $profile = self::metaOverrides(self::decodeJsonArray($profileRow['meta_json'] ?? null));
         $formats = self::normalizeFormats($profile['ad_formats']);
         foreach ($formats as $format => $enabled) {
