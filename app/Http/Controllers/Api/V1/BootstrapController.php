@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
-use App\Models\AdProfile;
 use App\Models\App;
 use App\Support\Ads\AdResolver;
 use App\Support\AppBranding;
@@ -55,27 +54,11 @@ class BootstrapController extends Controller
 
         $branding['capabilities'] = $capabilities;
 
-        $adProfile = AdProfile::query()
-            ->where('app_id', (int) $app->id)
-            ->first();
-
-        $meta = $adProfile ? (is_array($adProfile->meta_json) ? $adProfile->meta_json : []) : [];
-        $overrides = AdResolver::metaOverrides($meta);
-
-        $tabsAds = AdResolver::tabsAdsForApp((int) $app->id);
-
-        $adPolicy = [];
-        foreach ($tabsAds as $tabKey => $cfg) {
-            $adPolicy[$tabKey] = (bool) ($cfg['enabled'] ?? false);
-        }
-
-        if (isset($overrides['ad_policy']) && is_array($overrides['ad_policy'])) {
-            $adPolicy = array_merge($adPolicy, $overrides['ad_policy']);
-        }
-
-        $adFormats = $overrides['ad_formats'] ?? AdResolver::defaultFormats();
-        $nativeInList = $overrides['native_in_list'] ?? AdResolver::defaultNativeInList();
-        $interstitial = $overrides['interstitial'] ?? AdResolver::defaultInterstitial();
+        $ads = AdResolver::adsForApp((int) $app->id);
+        $adPolicy = $ads['ad_policy'];
+        $adFormats = $ads['formats'];
+        $nativeInList = $ads['native_in_list'];
+        $interstitial = $ads['interstitial'];
 
         $routes = $this->resolveRoutesForApp((int) $app->id);
         $hub = $this->resolveHubForApp((int) $app->id);
@@ -119,25 +102,15 @@ class BootstrapController extends Controller
             'native_in_list' => $nativeInList,
             'interstitial' => $interstitial,
 
-            'ads' => [
-                'enabled' => $adProfile ? (bool) $adProfile->ads_enabled : true,
-                'units' => [
-                    'banner' => $adProfile?->banner_unit_id,
-                    'native' => $adProfile?->native_unit_id,
-                    'interstitial' => $adProfile?->interstitial_unit_id,
-                ],
+            'ads' => array_merge($ads, [
                 'global' => [
-                    'ads_enabled' => $adProfile ? (bool) $adProfile->ads_enabled : true,
-                    'banner_unit_id' => $adProfile?->banner_unit_id,
-                    'native_unit_id' => $adProfile?->native_unit_id,
-                    'interstitial_unit_id' => $adProfile?->interstitial_unit_id,
+                    'ads_enabled' => $ads['enabled'],
+                    'banner_unit_id' => $ads['units']['banner'],
+                    'native_unit_id' => $ads['units']['native'],
+                    'interstitial_unit_id' => $ads['units']['interstitial'],
                 ],
-                'formats' => $adFormats,
-                'native_in_list' => $nativeInList,
-                'interstitial' => $interstitial,
                 'policy_version' => 2,
-                'tabs' => $tabsAds,
-            ],
+            ]),
 
             'watch' => $watch,
             'links' => $links,

@@ -203,8 +203,248 @@ class AdResolver
         ];
     }
 
+    /** Canonical advertising contract for one app. */
+    public static function adsForApp(int $appId): array
+    {
+        $profile = DB::table('ad_profiles')->where('app_id', $appId)->first();
+        $rules = DB::table('ad_rules')
+            ->where('app_id', $appId)
+            ->whereIn('scope_type', ['tab', 'route'])
+            ->orderBy('id')
+            ->get()
+            ->all();
+
+        return self::resolveContract($profile ? (array) $profile : [], $rules);
+    }
+
+    /** Side-effect-free resolver used by the API and focused contract tests. */
+    public static function resolveContract(array $profileRow, iterable $ruleRows): array
+    {
+        $masterEnabled = array_key_exists('ads_enabled', $profileRow)
+            ? (bool) $profileRow['ads_enabled']
+            : true;
+        $profile = self::metaOverrides(self::decodeJsonArray($profileRow['meta_json'] ?? null));
+        $formats = self::normalizeFormats($profile['ad_formats']);
+        foreach ($formats as $format => $enabled) {
+            $formats[$format] = $masterEnabled && $enabled;
+        }
+
+        $nativeInList = self::normalizeNativeConfig($profile['native_in_list']);
+        $nativeInList['enabled'] = $formats['native'] && $nativeInList['enabled'];
+        $globalInterstitial = self::normalizeInterstitialConfig($profile['interstitial']);
+
+        $orderedRules = is_array($ruleRows) ? array_values($ruleRows) : iterator_to_array($ruleRows, false);
+        usort($orderedRules, static fn ($left, $right): int =>
+            ((int) (((object) $left)->id ?? 0)) <=> ((int) (((object) $right)->id ?? 0))
+        );
+
+        $tabRules = [];
+        $routeRules = [];
+        foreach ($orderedRules as $rawRule) {
+            $rule = (object) $rawRule;
+            $key = self::canonicalKey((string) ($rule->scope_key ?? ''));
+            if ($key === null) {
+                continue;
+            }
+            if (($rule->scope_type ?? null) === 'tab' && in_array($key, self::mainTabs(), true)) {
+                $tabRules[$key] = $rule;
+            } elseif (($rule->scope_type ?? null) === 'route') {
+                $routeRules[$key] = $rule;
+            }
+        }
+
+        $makePolicy = static function (
+            string $key,
+            bool $enabled,
+            bool $banner,
+            bool $native,
+            bool $interstitial,
+            string $source,
+            array $settings = [],
+            ?int $typedCooldown = null
+        ) use ($masterEnabled, $formats, $nativeInList, $globalInterstitial): array {
+            $enabled = $masterEnabled && $enabled;
+            $banner = $enabled && $formats['banner'] && $banner;
+            $native = $enabled && $formats['native'] && $native;
+            $interstitial = $enabled && $formats['interstitial'] && $interstitial;
+
+            $bannerConfig = array_merge([
+                'placement' => str_contains($key, '.') ? 'page_bottom' : 'shell_bottom',
+                'hide_on_failure' => true,
+                'reserve_space_before_load' => false,
+            ], is_array($settings['banner'] ?? null) ? $settings['banner'] : []);
+            $nativeConfig = self::normalizeNativeConfig(array_merge(
+                $nativeInList,
+                is_array($settings['native'] ?? null) ? $settings['native'] : []
+            ));
+
+            // Cooldown precedence: settings JSON, typed column, profile, resolver default.
+            $interstitialOverrides = is_array($settings['interstitial'] ?? null) ? $settings['interstitial'] : [];
+            if (! array_key_exists('cooldown_seconds', $interstitialOverrides) && $typedCooldown !== null) {
+                $interstitialOverrides['cooldown_seconds'] = $typedCooldown;
+            }
+            $interstitialConfig = self::normalizeInterstitialConfig(array_merge($globalInterstitial, $interstitialOverrides));
+
+            if (($bannerConfig['placement'] ?? null) === 'disabled') {
+                $banner = false;
+            }
+            if (! $nativeConfig['enabled']) {
+                $native = false;
+            }
+            if (array_key_exists('enabled', $interstitialConfig) && ! $interstitialConfig['enabled']) {
+                $interstitial = false;
+            }
+
+            $bannerConfig['placement'] = $banner ? $bannerConfig['placement'] : 'disabled';
+            $nativeConfig['enabled'] = $native;
+            $interstitialConfig['enabled'] = $interstitial;
+
+            return [
+                'enabled' => $enabled,
+                'banner' => $banner,
+                'native' => $native,
+                'interstitial' => $interstitial,
+                'banner_config' => $bannerConfig,
+                'native_config' => $nativeConfig,
+                'interstitial_config' => $interstitialConfig,
+                'cooldown' => $interstitialConfig['cooldown_seconds'],
+                'source' => $source,
+                'scope_key' => $key,
+            ];
+        };
+
+        $policies = [];
+        foreach (self::mainTabs() as $tab) {
+            $rule = $tabRules[$tab] ?? null;
+            $defaultEnabled = (bool) (self::defaultTabPolicy()[$tab] ?? false);
+            $policies[$tab] = $rule
+                ? $makePolicy(
+                    $tab,
+                    (bool) ($rule->is_enabled ?? false),
+                    (bool) ($rule->banner_enabled ?? false),
+                    (bool) ($rule->native_enabled ?? false),
+                    (bool) ($rule->interstitial_enabled ?? false),
+                    'ad_rules.tab.' . $tab,
+                    self::decodeJsonArray($rule->settings_json ?? null),
+                    isset($rule->interstitial_cooldown_seconds) ? (int) $rule->interstitial_cooldown_seconds : null
+                )
+                : $makePolicy($tab, $defaultEnabled, $defaultEnabled, $defaultEnabled, false, 'default.tab.' . $tab);
+        }
+
+        $routeDefaults = [];
+        foreach (self::defaultRoutePlacementPolicies() as $rawKey => $default) {
+            $key = self::canonicalKey((string) $rawKey);
+            $parentKey = $key !== null ? self::parentTabForKey($key) : null;
+            if ($key === null || $parentKey === null || ! isset($policies[$parentKey])) {
+                continue;
+            }
+            $parent = $policies[$parentKey];
+            $policy = $makePolicy(
+                $key,
+                $parent['enabled'] && (bool) ($default['enabled'] ?? true),
+                $parent['banner'] && (bool) ($default['banner'] ?? false),
+                $parent['native'] && (bool) ($default['native'] ?? false),
+                $parent['interstitial'] && (bool) ($default['interstitial'] ?? false),
+                'default.route.' . $key,
+                is_array($default['settings'] ?? null) ? $default['settings'] : []
+            );
+            $policy['parent_key'] = $parentKey;
+            $routeDefaults[$key] = $policy;
+            $policies[$key] = $policy;
+        }
+
+        foreach ($routeRules as $key => $rule) {
+            $parentKey = self::parentTabForKey($key);
+            if ($parentKey === null || ! isset($policies[$parentKey])) {
+                continue;
+            }
+            $parent = $policies[$parentKey];
+            $base = $routeDefaults[$key] ?? $parent;
+            $settings = self::decodeJsonArray($rule->settings_json ?? null);
+            $override = is_array($settings['override'] ?? null) ? $settings['override'] : [];
+
+            $enabled = ($override['placement'] ?? false) === true
+                ? $parent['enabled'] && (bool) ($rule->is_enabled ?? false)
+                : (bool) $base['enabled'];
+            $banner = ($override['banner'] ?? false) === true
+                ? $parent['banner'] && (bool) ($rule->banner_enabled ?? false)
+                : (bool) $base['banner'];
+            $native = ($override['native'] ?? false) === true
+                ? $parent['native'] && (bool) ($rule->native_enabled ?? false)
+                : (bool) $base['native'];
+            $interstitial = ($override['interstitial'] ?? false) === true
+                ? $parent['interstitial'] && (bool) ($rule->interstitial_enabled ?? false)
+                : (bool) $base['interstitial'];
+
+            $defaultSettings = self::defaultRoutePlacementPolicies()[$key]['settings'] ?? [];
+            $policy = $makePolicy(
+                $key,
+                $enabled,
+                $banner,
+                $native,
+                $interstitial,
+                'ad_rules.route.' . $key,
+                array_replace_recursive(is_array($defaultSettings) ? $defaultSettings : [], $settings),
+                isset($rule->interstitial_cooldown_seconds) ? (int) $rule->interstitial_cooldown_seconds : null
+            );
+            $policy['parent_key'] = $parentKey;
+            $policy['inheritance'] = [
+                'placement' => ($override['placement'] ?? false) !== true,
+                'banner' => ($override['banner'] ?? false) !== true,
+                'native' => ($override['native'] ?? false) !== true,
+                'interstitial' => ($override['interstitial'] ?? false) !== true,
+            ];
+            $policies[$key] = $policy;
+        }
+
+        // Safety-only contexts may not belong to a navigation tab, but they
+        // must still resolve as explicit valid policies rather than falling
+        // through to an advertising-enabled tab policy.
+        foreach (self::protectedKeys() as $key) {
+            if (! isset($policies[$key])) {
+                $policies[$key] = $makePolicy($key, true, false, false, false, 'safety.protected');
+            }
+        }
+
+        foreach ($policies as $key => $policy) {
+            if (! self::isProtectedKey($key)) {
+                continue;
+            }
+            $policy['banner'] = false;
+            $policy['native'] = false;
+            $policy['interstitial'] = false;
+            $policy['banner_config']['placement'] = 'disabled';
+            $policy['native_config']['enabled'] = false;
+            $policy['interstitial_config']['enabled'] = false;
+            $policy['source'] = 'safety.protected';
+            $policy['protected'] = true;
+            $policies[$key] = $policy;
+        }
+
+        $adPolicy = [];
+        foreach ($policies as $key => $policy) {
+            $adPolicy[$key] = (bool) $policy['enabled'];
+        }
+
+        return [
+            'enabled' => $masterEnabled,
+            'formats' => $formats,
+            'units' => [
+                'banner' => self::nullableString($profileRow['banner_unit_id'] ?? null),
+                'native' => self::nullableString($profileRow['native_unit_id'] ?? null),
+                'interstitial' => self::nullableString($profileRow['interstitial_unit_id'] ?? null),
+            ],
+            'tabs' => $policies,
+            'native_in_list' => $nativeInList,
+            'interstitial' => $globalInterstitial,
+            'ad_policy' => $adPolicy,
+        ];
+    }
+
     public static function globalInterstitialForApp(int $appId): array
     {
+        return self::adsForApp($appId)['interstitial'];
+
         $meta = DB::table('ad_profiles')
             ->where('app_id', $appId)
             ->value('meta_json');
@@ -235,6 +475,8 @@ class AdResolver
      */
     public static function tabsAdsForApp(int $appId): array
     {
+        return self::adsForApp($appId)['tabs'];
+
         $profileMeta = self::decodeJsonArray(
             DB::table('ad_profiles')->where('app_id', $appId)->value('meta_json')
         );
@@ -433,6 +675,22 @@ class AdResolver
         $tabKey = strtolower(trim($tabKey));
         $routeKey = self::canonicalKey((string) $routeKey);
 
+        if ($routeKey !== null && self::isProtectedKey($routeKey)) {
+            if (isset($policies[$routeKey]) && is_array($policies[$routeKey])) {
+                return array_merge($policies[$routeKey], ['resolved_key' => $routeKey]);
+            }
+
+            $policy = self::disabledPolicy('safety.protected');
+            $policy['enabled'] = (bool) ($policies[$tabKey]['enabled'] ?? false);
+            $policy['native_config']['enabled'] = false;
+            $policy['interstitial_config']['enabled'] = false;
+            $policy['protected'] = true;
+            $policy['scope_key'] = $routeKey;
+            $policy['resolved_key'] = $routeKey;
+
+            return $policy;
+        }
+
         $candidates = [];
         if ($routeKey !== null && $routeKey !== '') {
             $candidates[] = $routeKey;
@@ -481,7 +739,10 @@ class AdResolver
             }
         }
 
-        if (str_starts_with($key, 'game.') || str_starts_with($key, 'quiz.') || str_starts_with($key, 'shorts')) {
+        if ($key === 'game' || $key === 'quiz'
+            || str_starts_with($key, 'game.')
+            || str_starts_with($key, 'quiz.')
+            || str_starts_with($key, 'shorts')) {
             return 'explore';
         }
         if (str_starts_with($key, 'notification.') || str_starts_with($key, 'saved.') || str_starts_with($key, 'download.') || str_starts_with($key, 'support.')) {
@@ -493,7 +754,16 @@ class AdResolver
 
     private static function isProtectedKey(string $key): bool
     {
-        $exact = [
+        if (in_array($key, self::protectedKeys(), true)) {
+            return true;
+        }
+
+        return preg_match('/^game\.[a-z0-9_-]+\.active$/', $key) === 1;
+    }
+
+    private static function protectedKeys(): array
+    {
+        return [
             'watch.player.live',
             'watch.player.hls',
             'watch.player.youtube',
@@ -506,12 +776,6 @@ class AdResolver
             'form.active',
             'authentication.active',
         ];
-
-        if (in_array($key, $exact, true)) {
-            return true;
-        }
-
-        return preg_match('/^game\.[a-z0-9_-]+\.active$/', $key) === 1;
     }
 
     private static function disabledPolicy(string $source): array
@@ -544,12 +808,55 @@ class AdResolver
         $metaJson = is_array($metaJson) ? $metaJson : [];
 
         return [
-            'ad_policy'      => array_merge(self::defaultTabPolicy(), $metaJson['ad_policy'] ?? []),
-            'ad_formats'     => array_merge(self::defaultFormats(), $metaJson['ad_formats'] ?? []),
-            'native_in_list' => array_merge(self::defaultNativeInList(), $metaJson['native_in_list'] ?? []),
-            'interstitial'   => array_merge(self::defaultInterstitial(), $metaJson['interstitial'] ?? []),
+            'ad_policy'      => array_merge(self::defaultTabPolicy(), is_array($metaJson['ad_policy'] ?? null) ? $metaJson['ad_policy'] : []),
+            'ad_formats'     => self::normalizeFormats(array_merge(self::defaultFormats(), is_array($metaJson['ad_formats'] ?? null) ? $metaJson['ad_formats'] : [])),
+            'native_in_list' => self::normalizeNativeConfig(array_merge(self::defaultNativeInList(), is_array($metaJson['native_in_list'] ?? null) ? $metaJson['native_in_list'] : [])),
+            'interstitial'   => self::normalizeInterstitialConfig(array_merge(self::defaultInterstitial(), is_array($metaJson['interstitial'] ?? null) ? $metaJson['interstitial'] : [])),
         ];
     }
+
+    private static function normalizeFormats(array $formats): array
+    {
+        return [
+            'banner' => (bool) ($formats['banner'] ?? false),
+            'native' => (bool) ($formats['native'] ?? false),
+            'interstitial' => (bool) ($formats['interstitial'] ?? false),
+        ];
+    }
+
+    private static function normalizeNativeConfig(array $config): array
+    {
+        return [
+            'enabled' => (bool) ($config['enabled'] ?? true),
+            'every' => max(1, min(1000, (int) ($config['every'] ?? 4))),
+            'start_after' => max(0, min(1000, (int) ($config['start_after'] ?? 4))),
+            'max_per_list' => max(0, min(1000, (int) ($config['max_per_list'] ?? 0))),
+        ];
+    }
+
+    private static function normalizeInterstitialConfig(array $config): array
+    {
+        $normalized = [
+            'cooldown_seconds' => max(1, min(86400, (int) ($config['cooldown_seconds'] ?? 120))),
+            'every_n_safe_actions' => max(1, min(1000, (int) ($config['every_n_safe_actions'] ?? 4))),
+            'minimum_launch_delay_seconds' => max(0, min(86400, (int) ($config['minimum_launch_delay_seconds'] ?? 20))),
+            'maximum_per_session' => max(0, min(1000, (int) ($config['maximum_per_session'] ?? 4))),
+            'minimum_page_dwell_seconds' => max(0, min(86400, (int) ($config['minimum_page_dwell_seconds'] ?? 0))),
+        ];
+        if (array_key_exists('enabled', $config)) {
+            $normalized['enabled'] = (bool) $config['enabled'];
+        }
+
+        return $normalized;
+    }
+
+    private static function nullableString(mixed $value): ?string
+    {
+        $value = trim((string) $value);
+
+        return $value === '' ? null : $value;
+    }
+
     private static function decodeJsonArray(mixed $value): array
     {
         if (is_array($value)) return $value;
