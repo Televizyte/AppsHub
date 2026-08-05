@@ -54,38 +54,52 @@ final class VideoSourceContract
         }
 
         $providerIdValid = self::isProviderVideoId($providerVideoId);
-        $externalUrlValid = self::isYouTubeVideoUrl($externalUrl);
+        $externalVideoId = self::youtubeVideoId($externalUrl);
+        $externalUrlValid = $externalVideoId !== null;
 
         return ($providerIdValid || $externalUrlValid)
             && (self::isAbsent($externalUrl) || $externalUrlValid)
-            && (self::isAbsent($providerVideoId) || $providerIdValid);
+            && (self::isAbsent($providerVideoId) || $providerIdValid)
+            && (! $providerIdValid || ! $externalUrlValid || trim((string) $providerVideoId) === $externalVideoId);
     }
 
     public static function isYouTubeVideoUrl(mixed $value): bool
     {
+        return self::youtubeVideoId($value) !== null;
+    }
+
+    public static function youtubeVideoId(mixed $value): ?string
+    {
         if (! self::isHttpUrl($value)) {
-            return false;
+            return null;
         }
 
         $parts = parse_url(trim((string) $value));
         $host = strtolower((string) ($parts['host'] ?? ''));
         $path = trim((string) ($parts['path'] ?? ''), '/');
+        parse_str((string) ($parts['query'] ?? ''), $query);
+
+        if (self::nonEmpty($query['list'] ?? null)) {
+            return null;
+        }
 
         if ($host === 'youtu.be' || $host === 'www.youtu.be') {
-            return $path !== '';
+            return self::isProviderVideoId($path) ? $path : null;
         }
 
         if (! in_array($host, ['youtube.com', 'www.youtube.com', 'm.youtube.com'], true)) {
-            return false;
+            return null;
         }
 
         if (str_starts_with($path, 'shorts/') || str_starts_with($path, 'embed/')) {
-            return trim(substr($path, strpos($path, '/') + 1)) !== '';
+            $id = trim(substr($path, strpos($path, '/') + 1));
+
+            return self::isProviderVideoId($id) ? $id : null;
         }
 
-        parse_str((string) ($parts['query'] ?? ''), $query);
+        $id = $query['v'] ?? null;
 
-        return $path === 'watch' && self::nonEmpty($query['v'] ?? null);
+        return $path === 'watch' && self::isProviderVideoId($id) ? trim((string) $id) : null;
     }
 
     private static function positiveId(mixed $value): bool

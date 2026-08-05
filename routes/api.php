@@ -26,6 +26,7 @@ use App\Http\Controllers\Api\V1\ModerationController;
 use App\Http\Controllers\Api\V1\BookController;
 use App\Http\Controllers\Api\V1\BibleEngineController;
 use App\Http\Controllers\Api\V1\FeedController;
+use App\Http\Controllers\Api\V1\VideoController;
 
 /*
 |--------------------------------------------------------------------------
@@ -110,6 +111,14 @@ Route::prefix('v1')->group(function () {
 
             // Watch
             Route::get('/watch', [WatchController::class, 'index']);
+
+            // Video Channel Engine
+            Route::get('/video-channels', [VideoController::class, 'channels']);
+            Route::get('/video-channels/{channelSlug}', [VideoController::class, 'channel']);
+            Route::get('/video-playlists', [VideoController::class, 'playlists']);
+            Route::get('/video-playlists/{playlistSlug}', [VideoController::class, 'playlist']);
+            Route::get('/videos', [VideoController::class, 'videos']);
+            Route::get('/videos/{videoSlug}', [VideoController::class, 'video']);
 
             // Push device registration
             // This must stay outside auth:sanctum so first-time users can receive public app notifications.
