@@ -46,7 +46,7 @@ final class VideoQueryService
             return null;
         }
 
-        $channel->load(['playlists' => fn (Builder $query) => $query
+        $channel->load(['playlists' => fn ($query) => $query
             ->where('app_id', $appId)
             ->publiclyVisible()
             ->with(['channel', 'thumbnailMediaAsset' => $this->ownedActiveMedia($appId)])
@@ -89,10 +89,10 @@ final class VideoQueryService
             return null;
         }
 
-        $playlist->load(['items' => fn (Builder $query) => $query
+        $playlist->load(['items' => fn ($query) => $query
             ->where('app_id', $appId)
             ->whereHas('video', fn (Builder $video) => $this->applyPublicVideoHierarchy($video, $appId))
-            ->with(['video' => fn (Builder $video) => $this->applyPublicVideoHierarchy($video, $appId)
+            ->with(['video' => fn ($video) => $this->applyPublicVideoHierarchy($video, $appId)
                 ->with([
                     'channel',
                     'mediaAsset' => $this->ownedActiveMedia($appId),
@@ -196,7 +196,7 @@ final class VideoQueryService
         return $this->applyPublicVideoHierarchy(Video::query(), $appId);
     }
 
-    private function applyPublicVideoHierarchy(Builder $query, int $appId): Builder
+    private function applyPublicVideoHierarchy($query, int $appId)
     {
         return $query
             ->where('app_id', $appId)
@@ -207,7 +207,7 @@ final class VideoQueryService
 
     private function ownedActiveMedia(int $appId): \Closure
     {
-        return fn (Builder $query) => $query->where('app_id', $appId)->where('is_active', true);
+        return fn ($query) => $query->where('app_id', $appId)->where('is_active', true);
     }
 
     private function applyBooleanFilter(Builder $query, string $column, mixed $value): void
