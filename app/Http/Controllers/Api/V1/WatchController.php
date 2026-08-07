@@ -207,6 +207,43 @@ class WatchController extends Controller
                 'other_channels' => $groups['other_channels'] ?? [],
                 'groups' => $groups,
                 'items' => $items,
+
+                'video_catalog' => [
+                    'enabled' => true,
+                    'contract_version' => '1.0',
+                    'source' => 'video_engine',
+                    'app_slug' => (string) $app->slug,
+
+                    'channels' => [
+                        'endpoint' => '/api/v1/apps/' . $app->slug . '/video-channels',
+                        'detail_endpoint' => '/api/v1/apps/' . $app->slug . '/video-channels/{channelSlug}',
+                    ],
+
+                    'playlists' => [
+                        'endpoint' => '/api/v1/apps/' . $app->slug . '/video-playlists',
+                        'detail_endpoint' => '/api/v1/apps/' . $app->slug . '/video-playlists/{playlistSlug}',
+                    ],
+
+                    'videos' => [
+                        'endpoint' => '/api/v1/apps/' . $app->slug . '/videos',
+                        'detail_endpoint' => '/api/v1/apps/' . $app->slug . '/videos/{videoSlug}',
+                    ],
+
+                    'capabilities' => [
+                        'channels' => true,
+                        'playlists' => true,
+                        'videos' => true,
+                        'uploaded_video' => true,
+                        'youtube_video' => true,
+                        'external_hls' => true,
+                        'external_embed' => true,
+                        'pagination' => true,
+                        'app_scoped' => true,
+                    ],
+
+                    'legacy_watch_compatibility' => true,
+                ],
+
                 'trace_id' => $traceId,
             ]);
         } catch (Throwable $e) {
