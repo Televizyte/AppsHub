@@ -1,4 +1,5 @@
 <x-filament-panels::page>
+    @php($focusedEditorRoute = request()->routeIs('admin.video-engine.*'))
     <style>
         [x-cloak] { display: none !important; }
         .ve-shell { display: flex; flex-direction: column; gap: 12px; }
@@ -90,6 +91,7 @@
         .ve-media-library { display: flex; flex-direction: column; min-height: 0; padding: 14px; }
         .ve-media-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(150px,1fr)); gap: 10px; overflow: auto; margin-top: 10px; }
         .ve-media-tile { overflow: hidden; padding: 7px; border: 1px solid rgba(148,163,184,.14); border-radius: 15px; background: rgba(30,41,59,.45); color: #fff; text-align: left; cursor: pointer; }
+        .ve-media-tile.selected { border-color: #22d3ee; box-shadow: 0 0 0 2px rgba(34,211,238,.22); }
         .ve-media-tile img { width: 100%; height: 105px; object-fit: contain; border-radius: 11px; background: #020617; }
         .ve-media-tile strong,.ve-media-tile small { display: block; overflow: hidden; margin-top: 6px; text-overflow: ellipsis; white-space: nowrap; }
         .ve-media-tile strong { font-size: 11px; }.ve-media-tile small { color: #94a3b8; font-size: 9px; }
@@ -102,6 +104,7 @@
          x-init="restoreScroll()"
          @beforeunload.window="rememberScroll()"
          @video-engine-keep-position.window="rememberScroll(); $nextTick(() => restoreScroll())">
+        @unless($focusedEditorRoute)
         <section class="ve-hero">
             <div class="ve-hero-top">
                 <div>
@@ -116,9 +119,9 @@
             </div>
             @if($activeAppId)
                 <div class="ve-actions">
-                    <button type="button" class="ve-btn primary" wire:click="createVideo">+ Add Video</button>
-                    <button type="button" class="ve-btn" wire:click="createChannel">+ Add Channel</button>
-                    <button type="button" class="ve-btn" wire:click="createPlaylist">+ Add Playlist</button>
+                    <a class="ve-btn primary" href="{{ route('admin.video-engine.video.create') }}">+ Add Video</a>
+                    <a class="ve-btn" href="{{ route('admin.video-engine.channel.create') }}">+ Add Channel</a>
+                    <a class="ve-btn" href="{{ route('admin.video-engine.playlist.create') }}">+ Add Playlist</a>
                 </div>
             @endif
         </section>
@@ -130,6 +133,7 @@
                 </button>
             @endforeach
         </nav>
+        @endunless
 
         @if(!$activeAppId)
             <section class="ve-card">
@@ -154,7 +158,7 @@
                             <div class="ve-kicker">{{ ucfirst($mediaTarget) }} workspace</div>
                             <div class="ve-focus-title">{{ str_starts_with($workspaceMode, 'video') ? ($editingVideoId ? 'Edit Video' : 'Create Video') : (str_starts_with($workspaceMode, 'channel') ? ($editingChannelId ? 'Edit Channel' : 'Create Channel') : ($editingPlaylistId ? 'Edit Playlist' : 'Create Playlist')) }}</div>
                         </div>
-                        <button type="button" class="ve-btn" wire:click="closeEditor">← Back</button>
+                        <a class="ve-btn" href="{{ url('/admin/video-engine?tab=' . $activeTab) }}">Back to {{ ucfirst($activeTab) }}</a>
                     </div>
                     <div class="ve-focus-body">
                         <div class="ve-editor-tabs">
@@ -210,6 +214,15 @@
                                     </div>
                                     @if($videoForm['source_type'] === 'uploaded_video')
                                         <div class="ve-form-span">
+                                            <label class="ve-label">Upload Video</label>
+                                            <div class="ve-media-selected">
+                                                <input class="ve-input" type="file" accept="video/mp4,video/webm,video/quicktime" x-ref="videoUpload">
+                                                <div>
+                                                    <button type="button" class="ve-btn primary" x-bind:disabled="uploading" x-on:click="uploadVideo">Upload & Select</button>
+                                                    <div class="ve-note">MP4, WebM or MOV. Maximum 200 MB. Uploads remain scoped to the active app.</div>
+                                                    <div class="ve-note" x-text="uploadMessage"></div>
+                                                </div>
+                                            </div>
                                             <label class="ve-label">Video from Media Library</label>
                                             <div class="ve-video-pick-list">
                                                 @forelse($this->videoAssets as $asset)
@@ -339,7 +352,7 @@
 
                         <div class="ve-actions">
                             <button type="button" class="ve-btn primary" x-on:click="rememberScroll()" wire:click="{{ $workspaceMode === 'video_editor' ? 'saveVideo' : ($workspaceMode === 'channel_editor' ? 'saveChannel' : 'savePlaylist') }}">Save</button>
-                            <button type="button" class="ve-btn" wire:click="closeEditor">Cancel</button>
+                            <a class="ve-btn" href="{{ url('/admin/video-engine?tab=' . $activeTab) }}">Cancel</a>
                         </div>
                     </div>
                 </div>
@@ -388,7 +401,7 @@
             <section class="ve-card"><div class="ve-card-pad">
                 <div class="ve-card-head">
                     <div><div class="ve-card-title">{{ ucfirst($activeTab) }}</div><div class="ve-note">{{ $activeTab === 'videos' ? 'Long-form video library.' : ($activeTab === 'channels' ? 'Organize delivery channels.' : 'Curate ordered playlists.') }}</div></div>
-                    <button type="button" class="ve-btn primary" wire:click="{{ $activeTab === 'videos' ? 'createVideo' : ($activeTab === 'channels' ? 'createChannel' : 'createPlaylist') }}">+ Add {{ ucfirst($kind) }}</button>
+                    <a class="ve-btn primary" href="{{ route('admin.video-engine.' . $kind . '.create') }}">+ Add {{ ucfirst($kind) }}</a>
                 </div>
                 <div class="ve-filterbar">
                     <div><label class="ve-label">Search</label><input class="ve-input" wire:model.live.debounce.400ms="search" placeholder="Search title"></div>
@@ -442,9 +455,14 @@
                         </aside>
                         <div class="ve-media-library">
                             <input class="ve-input" wire:model.live.debounce.350ms="mediaSearch" placeholder="Search images or buckets">
+                            <div class="ve-tabs" style="margin-top:10px" aria-label="Media categories">
+                                @foreach(['all' => 'All', 'recent' => 'Recent', 'banner' => 'Banners', 'book' => 'Book Covers', 'branding' => 'Branding', 'cover' => 'Content Cover', 'highlight' => 'Content Highlights'] as $filterKey => $filterLabel)
+                                    <button type="button" class="ve-tab {{ $mediaBucketFilter === $filterKey ? 'active' : '' }}" wire:click="setMediaBucketFilter('{{ $filterKey }}')">{{ $filterLabel }}</button>
+                                @endforeach
+                            </div>
                             <div class="ve-media-grid">
                                 @forelse($this->imageAssets as $asset)
-                                    <button type="button" class="ve-media-tile" wire:click="selectMediaAsset({{ $asset['id'] }})">
+                                    <button type="button" class="ve-media-tile {{ $candidateMediaAssetId === $asset['id'] ? 'selected' : '' }}" wire:click="chooseMediaAsset({{ $asset['id'] }})">
                                         <img src="{{ $asset['url'] }}" alt="">
                                         <strong>{{ $asset['label'] }}</strong>
                                         <small>{{ $asset['bucket'] }}{{ $asset['dimensions'] ? ' · ' . $asset['dimensions'] : '' }}</small>
@@ -453,6 +471,19 @@
                                     <div class="ve-empty">No matching images. Upload the first one.</div>
                                 @endforelse
                             </div>
+                            @if($this->candidateImage)
+                                <div class="ve-media-selected" style="margin-top:12px">
+                                    <div class="ve-thumb"><img src="{{ $this->candidateImage['url'] }}" alt=""></div>
+                                    <div>
+                                        <div class="ve-card-title">{{ $this->candidateImage['label'] }}</div>
+                                        <div class="ve-note">{{ $this->candidateImage['bucket'] }} / {{ $this->candidateImage['dimensions'] ?: 'Dimensions unavailable' }}</div>
+                                        <div class="ve-actions">
+                                            <button type="button" class="ve-btn primary" wire:click="confirmMediaAsset">Use Selected Image</button>
+                                            <a class="ve-btn" href="{{ $this->candidateImage['url'] }}" target="_blank" rel="noopener">Open Larger</a>
+                                        </div>
+                                    </div>
+                                </div>
+                            @endif
                         </div>
                     </div>
                     <footer class="ve-modal-foot"><button type="button" class="ve-btn" wire:click="closeMediaPicker">Cancel</button></footer>
@@ -485,13 +516,31 @@
                     });
                     const data = await response.json();
                     if (!response.ok || !data.ok || !data.asset?.id) throw new Error(data.message || 'Upload failed.');
-                    await this.$wire.selectMediaAsset(Number(data.asset.id), target);
-                    this.uploadMessage = 'Thumbnail selected.';
+                    await this.$wire.chooseMediaAsset(Number(data.asset.id));
+                    this.uploadMessage = 'Upload ready. Review it, then choose Use Selected Image.';
                 } catch (error) {
                     this.uploadMessage = error.message || 'Upload failed.';
                 } finally {
                     this.uploading = false;
                 }
+            },
+            async uploadVideo() {
+                const file = this.$refs.videoUpload?.files?.[0];
+                if (!file) { this.uploadMessage = 'Choose a video first.'; return; }
+                this.uploading = true;
+                this.uploadMessage = 'Uploading video...';
+                const body = new FormData();
+                body.append('file', file);
+                body.append('bucket', 'video_engine_uploads');
+                body.append('label', file.name.replace(/\.[^.]+$/, ''));
+                try {
+                    const response = await fetch(@js(route('admin.beginner.media-center.upload')), { method: 'POST', headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '', 'Accept': 'application/json' }, body });
+                    const data = await response.json();
+                    if (!response.ok || !data.ok || data.asset?.type !== 'video') throw new Error(data.message || 'Upload failed.');
+                    await this.$wire.selectVideoAsset(Number(data.asset.id));
+                    this.uploadMessage = 'Video uploaded and selected.';
+                } catch (error) { this.uploadMessage = error.message || 'Upload failed.'; }
+                finally { this.uploading = false; }
             },
         }));
     </script>

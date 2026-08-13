@@ -37,4 +37,12 @@
             <span>Mark as live</span>
         </label>
     @endif
+
+    @if($showLive)
+        <label class="ve-form-span">
+            <span class="ve-label">Schedule publication ({{ \App\Support\Scheduling\AdminScheduleTime::timezone() }})</span>
+            <input class="ve-input" type="datetime-local" wire:model="{{ $formKey }}.publish_at">
+            <span class="ve-note">Leave blank to publish immediately when status is Published. Clear the value to remove a schedule.</span>
+        </label>
+    @endif
 </div>

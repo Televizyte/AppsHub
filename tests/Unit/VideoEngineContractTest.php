@@ -160,7 +160,8 @@ class VideoEngineContractTest extends TestCase
         $this->assertStringContainsString("where('type', 'video')->where('is_active', true)", $page);
         $this->assertStringContainsString('selectVideoAsset', $view);
         $this->assertStringContainsString("route('admin.beginner.media-center.upload')", $view);
-        $this->assertStringContainsString('selectMediaAsset(Number(data.asset.id), target)', $view);
+        $this->assertStringContainsString('chooseMediaAsset(Number(data.asset.id))', $view);
+        $this->assertStringContainsString('confirmMediaAsset', $view);
         $this->assertStringNotContainsString('function parse', strtolower($page));
         $this->assertStringNotContainsString('wire:click="delete', $view);
     }
@@ -175,6 +176,25 @@ class VideoEngineContractTest extends TestCase
         $this->assertStringContainsString('appearance: none', $view);
         $this->assertStringContainsString('video-engine-card', $view);
         $this->assertStringNotContainsString('settings_json', $view);
+    }
+
+    public function test_dedicated_workspaces_uploads_and_scheduling_use_existing_contracts(): void
+    {
+        $page = $this->source('app/Filament/Pages/VideoEngine.php');
+        $view = $this->source('resources/views/filament/pages/video-engine.blade.php');
+        $routes = $this->source('routes/web.php');
+        $media = $this->source('app/Http/Controllers/Admin/BeginnerMediaCenterController.php');
+        $create = $this->source('app/Http/Controllers/Admin/BeginnerContentCreateController.php');
+
+        $this->assertStringContainsString('admin/video-engine', $routes);
+        $this->assertStringContainsString('name("admin.video-engine.$kind.create")', $routes);
+        $this->assertStringContainsString('name("admin.video-engine.$kind.edit")', $routes);
+        $this->assertStringContainsString("request()->routeIs('admin.video-engine.*')", $view);
+        $this->assertStringContainsString("body.append('bucket', 'video_engine_uploads')", $view);
+        $this->assertStringContainsString("ActiveApp::selectedId()", $media);
+        $this->assertStringContainsString("'usage' => \$type === 'video'", $media);
+        $this->assertStringContainsString('AdminScheduleTime::toUtc', $page);
+        $this->assertStringContainsString('AdminScheduleTime::toUtc', $create);
     }
 
     private function source(string $relative): string

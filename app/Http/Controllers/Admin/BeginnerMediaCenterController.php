@@ -14,7 +14,7 @@ class BeginnerMediaCenterController extends Controller
 {
     public function upload(Request $request): JsonResponse
     {
-        $activeAppId = (int) (ActiveApp::ensureId() ?? 0);
+        $activeAppId = (int) (ActiveApp::selectedId() ?? 0);
 
         if ($activeAppId < 1) {
             return response()->json([
@@ -25,12 +25,13 @@ class BeginnerMediaCenterController extends Controller
 
         // 🔥 SUPPORT BOTH IMAGE + VIDEO
         $validated = $request->validate([
-            'file' => ['required', 'file', 'max:204800'], // 200MB
+            'file' => ['nullable', 'file', 'mimetypes:image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime', 'max:204800'],
+            'image_file' => ['nullable', 'image', 'max:8192'],
             'bucket' => ['nullable', 'string', 'max:80'],
             'label' => ['nullable', 'string', 'max:255'],
         ]);
 
-        $file = $request->file('file');
+        $file = $request->file('file') ?: $request->file('image_file');
 
         if (! $file) {
             return response()->json([
@@ -74,6 +75,10 @@ class BeginnerMediaCenterController extends Controller
             'url' => $url,
             'mime' => $mime,
             'size' => $file->getSize(),
+            'tags_json' => [
+                'source' => 'beginner_media_center',
+                'usage' => $type === 'video' && $bucket === 'video_engine_uploads' ? 'long_form_video' : 'shared_media',
+            ],
             'is_active' => true,
             'sort_order' => 0,
         ]);

@@ -9,6 +9,7 @@ use App\Models\MediaAsset;
 use App\Models\User;
 use App\Support\ActiveApp;
 use App\Support\ShortVideos\ShortVideoPayload;
+use App\Support\Scheduling\AdminScheduleTime;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -71,6 +72,7 @@ class BeginnerContentCreateController extends Controller
             'media_asset_id' => ['nullable', 'integer', 'exists:media_assets,id'],
             'is_featured' => ['nullable', 'boolean'],
             'sort_order' => ['nullable', 'integer'],
+            'publish_at' => ['nullable', 'date'],
             'item_id' => ['nullable', 'integer'],
             'return' => ['nullable', 'string'],
 
@@ -155,7 +157,8 @@ class BeginnerContentCreateController extends Controller
             'author_name' => $authorName !== '' ? $authorName : null,
             'is_featured' => (bool) ($data['is_featured'] ?? false),
             'sort_order' => (int) ($data['sort_order'] ?? 0),
-            'published_at' => $status === 'published' ? now() : null,
+            'publish_at' => AdminScheduleTime::toUtc($data['publish_at'] ?? null),
+            'published_at' => $status === 'published' ? (AdminScheduleTime::toUtc($data['publish_at'] ?? null) ?: now()) : null,
             'meta_json' => $meta,
         ]);
 
@@ -451,4 +454,3 @@ class BeginnerContentCreateController extends Controller
         ]);
     }
 }
-

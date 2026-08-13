@@ -246,6 +246,11 @@
                     </div>
 
                     <div class="dxm-col-4">
+                        <label for="publish_at">Schedule At ({{ \App\Support\Scheduling\AdminScheduleTime::timezone() }})</label>
+                        <input id="publish_at" name="publish_at" type="datetime-local" value="{{ old('publish_at') }}">
+                    </div>
+
+                    <div class="dxm-col-4">
                         <label class="dxm-checkbox" style="margin-top:24px;">
                             <input type="checkbox" id="is_featured" name="is_featured" value="1" @checked(old('is_featured'))>
                             <span>Mark as featured</span>
@@ -582,4 +587,3 @@ document.addEventListener('DOMContentLoaded', function () {
 </script>
 @endpush
 @endonce
-

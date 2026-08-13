@@ -39,7 +39,7 @@
         </div>
         @if(empty($previewOnly))
             <div class="ve-actions" style="margin-top:9px">
-                <button type="button" class="ve-mini-btn primary" wire:click="{{ $kind === 'video' ? 'editVideo' : ($kind === 'channel' ? 'editChannel' : 'editPlaylist') }}({{ $record->id }})">{{ $kind === 'playlist' ? 'Manage' : 'Edit' }}</button>
+                <a class="ve-mini-btn primary" href="{{ route('admin.video-engine.' . $kind . '.edit', ['record' => $record->id]) }}">{{ $kind === 'playlist' ? 'Manage' : 'Edit' }}</a>
                 @if($kind === 'video')
                     <button type="button" class="ve-mini-btn" wire:click="previewVideo({{ $record->id }})">Preview</button>
                 @endif

@@ -15,6 +15,7 @@ class VideoEngineBladeCompilationTest extends TestCase
             resource_path('views/filament/pages/partials/video-engine-thumbnail-picker.blade.php'),
             resource_path('views/filament/pages/partials/video-engine-publishing.blade.php'),
             resource_path('views/filament/pages/partials/video-engine-preview.blade.php'),
+            resource_path('views/admin/beginner/content-posts/create.blade.php'),
         ];
 
         foreach ($views as $view) {

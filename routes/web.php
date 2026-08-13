@@ -229,6 +229,15 @@ Route::middleware(['web', 'auth'])
 | session expires. Filament login lives under /admin/login, so this small
 | fallback prevents Route [login] not defined errors.
 */
+Route::middleware(['web', 'auth'])->prefix('admin/video-engine')->group(function () {
+    foreach (['videos' => 'video', 'channels' => 'channel', 'playlists' => 'playlist'] as $plural => $kind) {
+        Route::get("/$plural/create", \App\Filament\Pages\VideoEngine::class)
+            ->defaults('kind', $kind)->defaults('action', 'create')->name("admin.video-engine.$kind.create");
+        Route::get("/$plural/{record}/edit", \App\Filament\Pages\VideoEngine::class)
+            ->whereNumber('record')->defaults('kind', $kind)->defaults('action', 'edit')->name("admin.video-engine.$kind.edit");
+    }
+});
+
 Route::get('/login', function () {
     return redirect('/admin/login');
 })->name('login');

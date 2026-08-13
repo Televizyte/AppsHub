@@ -10,6 +10,7 @@ use App\Models\VideoPlaylist;
 use App\Models\VideoPlaylistItem;
 use App\Support\ActiveApp;
 use App\Support\AdminAccess;
+use App\Support\Scheduling\AdminScheduleTime;
 use App\Support\Video\VideoDomainGuard;
 use App\Support\Video\MediaAssetPublicUrl;
 use App\Support\Video\VideoPlaybackPayload;
@@ -49,7 +50,9 @@ class VideoEngine extends Page
     public string $playlistVideoSearch = '';
     public string $mediaSearch = '';
     public string $mediaPickerTarget = '';
+    public string $mediaBucketFilter = 'all';
     public bool $showMediaPicker = false;
+    public ?int $candidateMediaAssetId = null;
     public ?int $editingChannelId = null;
     public ?int $editingPlaylistId = null;
     public ?int $editingVideoId = null;
@@ -71,13 +74,21 @@ class VideoEngine extends Page
         'editingVideoId' => ['as' => 'video', 'except' => null],
     ];
 
-    public function mount(): void
+    public function mount(?string $kind = null, ?string $action = null, ?int $record = null): void
     {
         $this->activeAppId = ActiveApp::selectedId();
         $this->activeAppName = $this->activeAppId
             ? (string) (App::query()->whereKey($this->activeAppId)->value('name') ?? '')
             : '';
         $this->resetForms();
+
+        if ($kind && $action) {
+            abort_unless(AdminAccess::page('video_engine'), 403);
+            if ($kind === 'video') $action === 'edit' && $record ? $this->editVideo($record) : $this->createVideo();
+            if ($kind === 'channel') $action === 'edit' && $record ? $this->editChannel($record) : $this->createChannel();
+            if ($kind === 'playlist') $action === 'edit' && $record ? $this->editPlaylist($record) : $this->createPlaylist();
+            return;
+        }
 
         $requestedTab = (string) request()->query('tab', $this->activeTab);
         $this->activeTab = in_array($requestedTab, self::tabs(), true) ? $requestedTab : 'overview';
@@ -253,6 +264,7 @@ class VideoEngine extends Page
             'is_featured' => (bool) $video->is_featured, 'sort_order' => (int) $video->sort_order,
             'embed_allowed' => (bool) ($playback['embed_allowed'] ?? false),
             'external_open_allowed' => (bool) ($playback['external_open_allowed'] ?? false),
+            'publish_at' => AdminScheduleTime::toLocalInput($video->publish_at),
         ];
         $this->workspaceMode = 'video_editor';
         $this->activeTab = 'videos';
@@ -267,7 +279,7 @@ class VideoEngine extends Page
     public function saveVideo(): void
     {
         if (! $this->requireActiveApp()) return;
-        $data = $this->validate(['videoForm.video_channel_id' => 'required|integer|min:1', 'videoForm.title' => 'required|string|max:255', 'videoForm.slug' => 'nullable|string|max:255', 'videoForm.description' => 'nullable|string', 'videoForm.source_type' => 'required|in:uploaded_video,external_video,hls,youtube_video,web_embed', 'videoForm.provider' => 'nullable|string|max:80', 'videoForm.provider_video_id' => 'nullable|string|max:255', 'videoForm.media_asset_id' => 'nullable|integer|min:1', 'videoForm.external_url' => 'nullable|string|max:2048', 'videoForm.thumbnail_media_asset_id' => 'nullable|integer|min:1', 'videoForm.mime_type' => 'nullable|string|max:120', 'videoForm.duration_seconds' => 'nullable|integer|min:0', 'videoForm.aspect_ratio' => 'nullable|string|max:40', 'videoForm.is_live' => 'boolean', 'videoForm.status' => 'required|in:draft,published,archived', 'videoForm.visibility' => 'required|in:public,private,unlisted', 'videoForm.is_featured' => 'boolean', 'videoForm.sort_order' => 'integer|min:0', 'videoForm.embed_allowed' => 'boolean', 'videoForm.external_open_allowed' => 'boolean'])['videoForm'];
+        $data = $this->validate(['videoForm.video_channel_id' => 'required|integer|min:1', 'videoForm.title' => 'required|string|max:255', 'videoForm.slug' => 'nullable|string|max:255', 'videoForm.description' => 'nullable|string', 'videoForm.source_type' => 'required|in:uploaded_video,external_video,hls,youtube_video,web_embed', 'videoForm.provider' => 'nullable|string|max:80', 'videoForm.provider_video_id' => 'nullable|string|max:255', 'videoForm.media_asset_id' => 'nullable|integer|min:1', 'videoForm.external_url' => 'nullable|string|max:2048', 'videoForm.thumbnail_media_asset_id' => 'nullable|integer|min:1', 'videoForm.mime_type' => 'nullable|string|max:120', 'videoForm.duration_seconds' => 'nullable|integer|min:0', 'videoForm.aspect_ratio' => 'nullable|string|max:40', 'videoForm.is_live' => 'boolean', 'videoForm.status' => 'required|in:draft,published,archived', 'videoForm.visibility' => 'required|in:public,private,unlisted', 'videoForm.is_featured' => 'boolean', 'videoForm.sort_order' => 'integer|min:0', 'videoForm.publish_at' => 'nullable|date', 'videoForm.embed_allowed' => 'boolean', 'videoForm.external_open_allowed' => 'boolean'])['videoForm'];
         if (! $this->owned(VideoChannel::query(), (int) $data['video_channel_id'])->exists()) { $this->ownershipError('channel'); return; }
         $source = self::canonicalSourceFields($data);
         if (! VideoSourceContract::isValid($source)) { Notification::make()->title('Invalid video source')->body('Complete only the controls required for the selected source type.')->danger()->send(); return; }
@@ -278,6 +290,8 @@ class VideoEngine extends Page
         if (! $video) { $this->notFound('Video'); return; }
         $playbackPatch = ['embed_allowed' => (bool) $data['embed_allowed'], 'external_open_allowed' => (bool) $data['external_open_allowed']];
         unset($data['embed_allowed'], $data['external_open_allowed']);
+        $data['publish_at'] = AdminScheduleTime::toUtc($data['publish_at'] ?? null);
+        $data['published_at'] = ($data['status'] ?? 'draft') === 'published' ? ($data['publish_at'] ?: $video->published_at ?: now()) : null;
         $video->fill(array_merge($data, $source, ['slug' => trim((string) ($data['slug'] ?? '')) ?: Str::slug($data['title']), 'thumbnail_media_asset_id' => $thumbnailId]));
         $video->playback_settings_json = self::preserveAdvancedJson($video->playback_settings_json, $playbackPatch);
         $video->settings_json = self::preserveAdvancedJson($video->settings_json, ['last_beginner_edit' => 'video_engine']);
@@ -460,8 +474,9 @@ class VideoEngine extends Page
             ->where('type', 'image')->where('is_active', true)
             ->when(trim($this->mediaSearch) !== '', function ($query): void {
                 $search = '%' . trim($this->mediaSearch) . '%';
-                $query->where(fn ($inner) => $inner->where('label', 'like', $search)->orWhere('bucket', 'like', $search));
+                $query->where(fn ($inner) => $inner->where('label', 'like', $search)->orWhere('bucket', 'like', $search)->orWhere('url', 'like', $search));
             })
+            ->when(! in_array($this->mediaBucketFilter, ['all', 'recent'], true), fn ($query) => $query->where('bucket', 'like', '%' . $this->mediaBucketFilter . '%'))
             ->latest('id')->limit(120)->get()
             ->map(fn (MediaAsset $asset): array => [
                 'id' => (int) $asset->id,
@@ -477,6 +492,7 @@ class VideoEngine extends Page
         if (! $this->activeAppId) return [];
         return $this->owned(MediaAsset::query())
             ->where('type', 'video')->where('is_active', true)
+            ->where('bucket', 'not like', '%short_video%')
             ->latest('id')->limit(80)->get()->all();
     }
 
@@ -496,6 +512,8 @@ class VideoEngine extends Page
         if (! $this->requireActiveApp() || ! in_array($target, ['video', 'channel', 'playlist'], true)) return;
         $this->mediaPickerTarget = $target;
         $this->mediaSearch = '';
+        $this->mediaBucketFilter = 'all';
+        $this->candidateMediaAssetId = null;
         $this->showMediaPicker = true;
     }
 
@@ -506,20 +524,41 @@ class VideoEngine extends Page
         $this->mediaSearch = '';
     }
 
-    public function selectMediaAsset(int $assetId, ?string $target = null): void
+    public function setMediaBucketFilter(string $filter): void
+    {
+        $allowed = ['all', 'recent', 'banner', 'book', 'branding', 'cover', 'highlight'];
+        $this->mediaBucketFilter = in_array($filter, $allowed, true) ? $filter : 'all';
+    }
+
+    public function chooseMediaAsset(int $assetId): void
     {
         if (! $this->requireActiveApp()) return;
         $asset = $this->owned(MediaAsset::query(), $assetId)->where('type', 'image')->where('is_active', true)->first();
-        $target = $target ?: $this->mediaPickerTarget;
-        if (! $asset || ! in_array($target, ['video', 'channel', 'playlist'], true)) {
+        if (! $asset) {
             $this->ownershipError('thumbnail');
             return;
         }
+        $this->candidateMediaAssetId = $assetId;
+    }
+
+    public function confirmMediaAsset(?string $target = null): void
+    {
+        if (! $this->requireActiveApp() || ! $this->candidateMediaAssetId) return;
+        $assetId = $this->candidateMediaAssetId;
+        $target = $target ?: $this->mediaPickerTarget;
+        if (! $this->owned(MediaAsset::query(), $assetId)->where('type', 'image')->where('is_active', true)->exists()
+            || ! in_array($target, ['video', 'channel', 'playlist'], true)) return;
         if ($target === 'video') $this->videoForm['thumbnail_media_asset_id'] = $assetId;
         if ($target === 'channel') $this->channelForm['thumbnail_media_asset_id'] = $assetId;
         if ($target === 'playlist') $this->playlistForm['thumbnail_media_asset_id'] = $assetId;
         $this->closeMediaPicker();
         $this->dispatch('video-engine-thumbnail-selected');
+    }
+
+    public function getCandidateImageProperty(): ?array
+    {
+        if (! $this->candidateMediaAssetId) return null;
+        return collect($this->imageAssets)->firstWhere('id', $this->candidateMediaAssetId);
     }
 
     public function clearMediaAsset(string $target): void
@@ -589,7 +628,7 @@ class VideoEngine extends Page
     private function resetForms(): void { $this->resetChannelForm(); $this->resetPlaylistForm(); $this->resetVideoForm(); }
     private function resetChannelForm(): void { $this->channelForm = ['title' => '', 'slug' => '', 'description' => '', 'thumbnail_media_asset_id' => null, 'status' => 'draft', 'visibility' => 'public', 'is_featured' => false, 'sort_order' => 0]; }
     private function resetPlaylistForm(): void { $this->playlistForm = ['video_channel_id' => null, 'title' => '', 'slug' => '', 'description' => '', 'provider' => '', 'provider_playlist_id' => '', 'external_url' => '', 'thumbnail_media_asset_id' => null, 'status' => 'draft', 'visibility' => 'public', 'is_featured' => false, 'sort_order' => 0, 'video_ids' => []]; }
-    private function resetVideoForm(): void { $this->videoForm = ['video_channel_id' => null, 'title' => '', 'slug' => '', 'description' => '', 'source_type' => VideoSourceContract::UPLOADED_VIDEO, 'provider' => '', 'provider_video_id' => '', 'media_asset_id' => null, 'external_url' => '', 'thumbnail_media_asset_id' => null, 'mime_type' => '', 'duration_seconds' => null, 'aspect_ratio' => '', 'is_live' => false, 'status' => 'draft', 'visibility' => 'public', 'is_featured' => false, 'sort_order' => 0, 'embed_allowed' => false, 'external_open_allowed' => false]; }
+    private function resetVideoForm(): void { $this->videoForm = ['video_channel_id' => null, 'title' => '', 'slug' => '', 'description' => '', 'source_type' => VideoSourceContract::UPLOADED_VIDEO, 'provider' => '', 'provider_video_id' => '', 'media_asset_id' => null, 'external_url' => '', 'thumbnail_media_asset_id' => null, 'mime_type' => '', 'duration_seconds' => null, 'aspect_ratio' => '', 'is_live' => false, 'status' => 'draft', 'visibility' => 'public', 'is_featured' => false, 'sort_order' => 0, 'publish_at' => '', 'embed_allowed' => false, 'external_open_allowed' => false]; }
     private static function nullableString(mixed $value): ?string { $value = trim((string) ($value ?? '')); return $value === '' ? null : $value; }
     private static function nullablePositiveInt(mixed $value): ?int { return is_numeric($value) && (int) $value > 0 ? (int) $value : null; }
     private function saved(string $subject): void { Notification::make()->title($subject . ' saved')->success()->send(); }
