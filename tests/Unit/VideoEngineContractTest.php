@@ -122,8 +122,11 @@ class VideoEngineContractTest extends TestCase
 
         foreach (['video_editor', 'channel_editor', 'playlist_editor'] as $workspace) {
             $this->assertStringContainsString($workspace, $page);
-            $this->assertStringContainsString($workspace, $view);
         }
+        $this->assertStringContainsString("@if(\$workspaceMode === 'video_editor')", $view);
+        $this->assertStringContainsString("@elseif(\$workspaceMode === 'channel_editor')", $view);
+        $this->assertStringContainsString("default=>['details'=>'Details','videos'=>'Videos','publishing'=>'Publishing','preview'=>'Preview']", $view);
+        $this->assertStringContainsString("'savePlaylist'", $view);
         foreach (['details', 'source', 'media', 'videos', 'publishing', 'preview'] as $tab) {
             $this->assertStringContainsString("'{$tab}'", $page);
         }
