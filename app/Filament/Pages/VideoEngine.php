@@ -47,6 +47,9 @@ class VideoEngine extends Page
     public string $statusFilter = 'all';
     public string $sourceFilter = 'all';
     public string $playlistVideoSearch = '';
+    public string $mediaSearch = '';
+    public string $mediaPickerTarget = '';
+    public bool $showMediaPicker = false;
     public ?int $editingChannelId = null;
     public ?int $editingPlaylistId = null;
     public ?int $editingVideoId = null;
@@ -110,12 +113,12 @@ class VideoEngine extends Page
     public function selectEditorTab(string $tab): void
     {
         $allowed = match ($this->workspaceMode) {
-            'video_editor' => ['details', 'source', 'media', 'publishing', 'preview'],
-            'channel_editor' => ['details', 'media', 'publishing', 'preview'],
-            'playlist_editor' => ['details', 'videos', 'publishing', 'preview'],
-            default => ['details'],
+            'video_editor' => ['content', 'source', 'thumbnail', 'publishing', 'preview'],
+            'channel_editor' => ['details', 'thumbnail', 'publishing', 'preview'],
+            'playlist_editor' => ['details', 'videos', 'thumbnail', 'publishing', 'preview'],
+            default => ['content'],
         };
-        $this->editorTab = in_array($tab, $allowed, true) ? $tab : 'details';
+        $this->editorTab = in_array($tab, $allowed, true) ? $tab : $allowed[0];
     }
 
     public function setLibraryView(string $view): void
@@ -226,7 +229,7 @@ class VideoEngine extends Page
         if (! $this->requireActiveApp()) return;
         $this->resetVideoForm();
         $this->editingVideoId = null;
-        $this->editorTab = 'details';
+        $this->editorTab = 'content';
         $this->workspaceMode = 'video_editor';
         $this->activeTab = 'videos';
     }
@@ -237,7 +240,7 @@ class VideoEngine extends Page
         $video = $this->owned(Video::query(), $id)->first();
         if (! $video) { $this->notFound('Video'); return; }
         $this->editingVideoId = $video->id;
-        $this->editorTab = in_array($this->editorTab, ['details', 'source', 'media', 'publishing', 'preview'], true) ? $this->editorTab : 'details';
+        $this->editorTab = in_array($this->editorTab, ['content', 'source', 'thumbnail', 'publishing', 'preview'], true) ? $this->editorTab : 'content';
         $playback = is_array($video->playback_settings_json) ? $video->playback_settings_json : [];
         $this->videoForm = [
             'video_channel_id' => $video->video_channel_id, 'title' => $video->title, 'slug' => $video->slug,
@@ -304,8 +307,23 @@ class VideoEngine extends Page
 
     public function getOverviewProperty(): array
     {
-        if (! $this->activeAppId) return ['channels' => 0, 'playlists' => 0, 'videos' => 0, 'published' => 0];
-        return ['channels' => $this->owned(VideoChannel::query())->count(), 'playlists' => $this->owned(VideoPlaylist::query())->count(), 'videos' => $this->owned(Video::query())->count(), 'published' => $this->owned(Video::query())->where('status', 'published')->count()];
+        if (! $this->activeAppId) return ['videos' => 0, 'published' => 0, 'channels' => 0, 'playlists' => 0, 'live' => 0, 'drafts' => 0];
+        return [
+            'videos' => $this->owned(Video::query())->count(),
+            'published' => $this->owned(Video::query())->where('status', 'published')->count(),
+            'channels' => $this->owned(VideoChannel::query())->count(),
+            'playlists' => $this->owned(VideoPlaylist::query())->count(),
+            'live' => $this->owned(Video::query())->where('is_live', true)->count(),
+            'drafts' => $this->owned(Video::query())->where('status', 'draft')->count(),
+        ];
+    }
+
+    public function getRecentVideosProperty(): array
+    {
+        if (! $this->activeAppId) return [];
+        return $this->owned(Video::query())
+            ->with(['channel', 'thumbnailMediaAsset'])
+            ->latest('id')->limit(6)->get()->all();
     }
 
     public function getChannelsProperty(): array
@@ -357,6 +375,15 @@ class VideoEngine extends Page
         return $this->owned(Video::query())
             ->when(trim($this->playlistVideoSearch) !== '', fn ($query) => $query->where('title', 'like', '%' . trim($this->playlistVideoSearch) . '%'))
             ->orderBy('title')->pluck('title', 'id')->all();
+    }
+
+    public function getAvailableVideosProperty(): array
+    {
+        if (! $this->activeAppId) return [];
+        return $this->owned(Video::query())
+            ->with(['channel', 'thumbnailMediaAsset'])
+            ->when(trim($this->playlistVideoSearch) !== '', fn ($query) => $query->where('title', 'like', '%' . trim($this->playlistVideoSearch) . '%'))
+            ->orderBy('title')->get()->all();
     }
 
     public function getSelectedPlaylistVideosProperty(): array
@@ -425,6 +452,82 @@ class VideoEngine extends Page
 
     public function getVideoMediaOptionsProperty(): array { return $this->mediaOptions('video'); }
     public function getImageMediaOptionsProperty(): array { return $this->mediaOptions('image'); }
+
+    public function getImageAssetsProperty(): array
+    {
+        if (! $this->activeAppId) return [];
+        return $this->owned(MediaAsset::query())
+            ->where('type', 'image')->where('is_active', true)
+            ->when(trim($this->mediaSearch) !== '', function ($query): void {
+                $search = '%' . trim($this->mediaSearch) . '%';
+                $query->where(fn ($inner) => $inner->where('label', 'like', $search)->orWhere('bucket', 'like', $search));
+            })
+            ->latest('id')->limit(120)->get()
+            ->map(fn (MediaAsset $asset): array => [
+                'id' => (int) $asset->id,
+                'label' => trim((string) $asset->label) ?: 'Image #' . $asset->id,
+                'bucket' => trim((string) $asset->bucket) ?: 'Media',
+                'url' => MediaAssetPublicUrl::resolve($asset, $this->activeAppId, 'image'),
+                'dimensions' => $asset->width && $asset->height ? $asset->width . '×' . $asset->height : null,
+            ])->filter(fn (array $asset): bool => $asset['url'] !== null)->values()->all();
+    }
+
+    public function getVideoAssetsProperty(): array
+    {
+        if (! $this->activeAppId) return [];
+        return $this->owned(MediaAsset::query())
+            ->where('type', 'video')->where('is_active', true)
+            ->latest('id')->limit(80)->get()->all();
+    }
+
+    public function selectVideoAsset(int $assetId): void
+    {
+        if (! $this->requireActiveApp()) return;
+        $asset = $this->owned(MediaAsset::query(), $assetId)->where('type', 'video')->where('is_active', true)->first();
+        if (! $asset) {
+            $this->ownershipError('video asset');
+            return;
+        }
+        $this->videoForm['media_asset_id'] = $assetId;
+    }
+
+    public function openMediaPicker(string $target): void
+    {
+        if (! $this->requireActiveApp() || ! in_array($target, ['video', 'channel', 'playlist'], true)) return;
+        $this->mediaPickerTarget = $target;
+        $this->mediaSearch = '';
+        $this->showMediaPicker = true;
+    }
+
+    public function closeMediaPicker(): void
+    {
+        $this->showMediaPicker = false;
+        $this->mediaPickerTarget = '';
+        $this->mediaSearch = '';
+    }
+
+    public function selectMediaAsset(int $assetId, ?string $target = null): void
+    {
+        if (! $this->requireActiveApp()) return;
+        $asset = $this->owned(MediaAsset::query(), $assetId)->where('type', 'image')->where('is_active', true)->first();
+        $target = $target ?: $this->mediaPickerTarget;
+        if (! $asset || ! in_array($target, ['video', 'channel', 'playlist'], true)) {
+            $this->ownershipError('thumbnail');
+            return;
+        }
+        if ($target === 'video') $this->videoForm['thumbnail_media_asset_id'] = $assetId;
+        if ($target === 'channel') $this->channelForm['thumbnail_media_asset_id'] = $assetId;
+        if ($target === 'playlist') $this->playlistForm['thumbnail_media_asset_id'] = $assetId;
+        $this->closeMediaPicker();
+        $this->dispatch('video-engine-thumbnail-selected');
+    }
+
+    public function clearMediaAsset(string $target): void
+    {
+        if ($target === 'video') $this->videoForm['thumbnail_media_asset_id'] = null;
+        if ($target === 'channel') $this->channelForm['thumbnail_media_asset_id'] = null;
+        if ($target === 'playlist') $this->playlistForm['thumbnail_media_asset_id'] = null;
+    }
 
     public function publicThumbnailUrl(?MediaAsset $asset): ?string
     {

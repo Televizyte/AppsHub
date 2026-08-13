@@ -70,7 +70,7 @@ class VideoEngineContractTest extends TestCase
         $this->assertStringContainsString('ActiveApp::selectedId()', $page);
         $this->assertStringContainsString("->where('app_id', \$this->activeAppId ?? 0)", $page);
         $this->assertStringContainsString("if (! \$this->activeAppId) return []", $page);
-        $this->assertStringContainsString("if (! \$this->activeAppId) return ['channels' => 0", $page);
+        $this->assertStringContainsString("if (! \$this->activeAppId) return ['videos' => 0", $page);
         $this->assertStringContainsString('this never falls back to another app', strtolower($activeApp));
 
         $selected = $this->methodSource('app/Support/ActiveApp.php', 'selectedId');
@@ -125,9 +125,10 @@ class VideoEngineContractTest extends TestCase
         }
         $this->assertStringContainsString("@if(\$workspaceMode === 'video_editor')", $view);
         $this->assertStringContainsString("@elseif(\$workspaceMode === 'channel_editor')", $view);
-        $this->assertStringContainsString("default=>['details'=>'Details','videos'=>'Videos','publishing'=>'Publishing','preview'=>'Preview']", $view);
+        $this->assertStringContainsString("'video_editor' => ['content' => 'Content', 'source' => 'Source', 'thumbnail' => 'Thumbnail', 'publishing' => 'Publishing', 'preview' => 'Preview']", $view);
+        $this->assertStringContainsString("default => ['details' => 'Details', 'videos' => 'Videos', 'thumbnail' => 'Thumbnail', 'publishing' => 'Publishing', 'preview' => 'Preview']", $view);
         $this->assertStringContainsString("'savePlaylist'", $view);
-        foreach (['details', 'source', 'media', 'videos', 'publishing', 'preview'] as $tab) {
+        foreach (['content', 'details', 'source', 'thumbnail', 'videos', 'publishing', 'preview'] as $tab) {
             $this->assertStringContainsString("'{$tab}'", $page);
         }
         foreach (['saveVideo', 'saveChannel', 'savePlaylist'] as $method) {
@@ -147,6 +148,33 @@ class VideoEngineContractTest extends TestCase
         $this->assertStringContainsString('Select an active app', $view);
         $this->assertStringContainsString('does not fall back to another app', $view);
         $this->assertStringNotContainsString('wire:click="delete', $view);
+    }
+
+    public function test_beginner_media_picker_reuses_the_shared_active_app_media_system(): void
+    {
+        $page = $this->source('app/Filament/Pages/VideoEngine.php');
+        $view = $this->source('resources/views/filament/pages/video-engine.blade.php');
+
+        $this->assertStringContainsString("->where('type', 'image')->where('is_active', true)", $page);
+        $this->assertStringContainsString("\$this->owned(MediaAsset::query(), \$assetId)", $page);
+        $this->assertStringContainsString("where('type', 'video')->where('is_active', true)", $page);
+        $this->assertStringContainsString('selectVideoAsset', $view);
+        $this->assertStringContainsString("route('admin.beginner.media-center.upload')", $view);
+        $this->assertStringContainsString('selectMediaAsset(Number(data.asset.id), target)', $view);
+        $this->assertStringNotContainsString('function parse', strtolower($page));
+        $this->assertStringNotContainsString('wire:click="delete', $view);
+    }
+
+    public function test_beginner_view_uses_canonical_visual_workspace_contract(): void
+    {
+        $view = $this->source('resources/views/filament/pages/video-engine.blade.php');
+
+        foreach (['ve-hero', 've-tabs', 've-stats', 've-library', 've-focus', 've-media-grid'] as $class) {
+            $this->assertStringContainsString($class, $view);
+        }
+        $this->assertStringContainsString('appearance: none', $view);
+        $this->assertStringContainsString('video-engine-card', $view);
+        $this->assertStringNotContainsString('settings_json', $view);
     }
 
     private function source(string $relative): string
