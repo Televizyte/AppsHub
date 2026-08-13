@@ -7,6 +7,7 @@ use App\Filament\Resources\VideoChannelResource\Pages;
 use App\Models\MediaAsset;
 use App\Models\VideoChannel;
 use App\Support\ActiveApp;
+use App\Support\AdminMode;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Tables;
@@ -21,6 +22,11 @@ class VideoChannelResource extends ActiveAppScopedResource
     protected static ?string $navigationLabel = 'Video Channels';
     protected static ?string $modelLabel = 'Video Channel';
     protected static ?string $pluralModelLabel = 'Video Channels';
+
+    public static function shouldRegisterNavigation(): bool
+    {
+        return AdminMode::isAdvanced();
+    }
 
     public static function form(Form $form): Form
     {

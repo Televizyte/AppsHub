@@ -119,7 +119,7 @@ final class AdminAccess
             'moderation' => self::has('comments.moderate'),
             'analytics' => self::has('analytics.view'),
             'ads_monetization' => self::has('monetization.view'),
-            'watch_builder' => self::has(['content.view', 'watch.manage']),
+            'watch_builder', 'video_engine' => self::has(['content.view', 'watch.manage']),
             'design_engine' => self::super() || self::has('design.view'),
             default => self::super(),
         };

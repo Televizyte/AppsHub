@@ -9,6 +9,7 @@ use App\Models\MediaAsset;
 use App\Models\VideoChannel;
 use App\Models\VideoPlaylist;
 use App\Support\ActiveApp;
+use App\Support\AdminMode;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Tables;
@@ -23,6 +24,11 @@ class VideoPlaylistResource extends ActiveAppScopedResource
     protected static ?string $navigationLabel = 'Video Playlists';
     protected static ?string $modelLabel = 'Video Playlist';
     protected static ?string $pluralModelLabel = 'Video Playlists';
+
+    public static function shouldRegisterNavigation(): bool
+    {
+        return AdminMode::isAdvanced();
+    }
 
     public static function form(Form $form): Form
     {

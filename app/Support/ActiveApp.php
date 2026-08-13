@@ -112,6 +112,28 @@ final class ActiveApp
     }
 
     /**
+     * Return only an explicitly selected app (session or saved user preference).
+     * Unlike get(), this never falls back to another app.
+     */
+    public static function selectedId(): ?int
+    {
+        $fromSession = session()->get(self::SESSION_KEY);
+        $sessionId = is_numeric($fromSession) ? (int) $fromSession : null;
+
+        if ($sessionId !== null) {
+            return self::isValidId($sessionId) ? $sessionId : null;
+        }
+
+        if (Auth::check() && is_numeric(Auth::user()->active_app_id)) {
+            $userId = (int) Auth::user()->active_app_id;
+
+            return self::isValidId($userId) ? $userId : null;
+        }
+
+        return null;
+    }
+
+    /**
      * Ensure session has a VALID active app id.
      * Returns the resolved id.
      */
