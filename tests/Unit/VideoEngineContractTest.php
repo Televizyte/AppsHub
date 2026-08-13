@@ -146,7 +146,7 @@ class VideoEngineContractTest extends TestCase
         $view = $this->source('resources/views/filament/pages/video-engine.blade.php');
 
         $this->assertStringContainsString('Select an active app', $view);
-        $this->assertStringContainsString('does not fall back to another app', $view);
+        $this->assertStringContainsString('@if(!$activeAppId)', $view);
         $this->assertStringNotContainsString('wire:click="delete', $view);
     }
 
