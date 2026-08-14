@@ -13,7 +13,12 @@ class VideoEngineContractTest extends TestCase
         $page = $this->source('app/Filament/Pages/VideoEngine.php');
         $access = $this->source('app/Support/AdminAccess.php');
 
-        $this->assertSame(2, substr_count($page, "AdminAccess::page('video_engine')"));
+        $this->assertGreaterThanOrEqual(2, substr_count($page, "AdminAccess::page('video_engine')"));
+        $this->assertStringContainsString(
+            "abort_unless(AdminAccess::page('video_engine'), 403)",
+            $this->reflectionSource(VideoEngine::class, 'mount'),
+        );
+        $this->assertStringNotContainsString('AdminAccess::has(', $page);
         $this->assertStringContainsString("'video_engine' => self::has(['content.view', 'watch.manage'])", str_replace("'watch_builder', ", '', $access));
         $this->assertStringContainsString("protected static ?string \$navigationGroup = 'Shared Engines'", $page);
         $this->assertStringContainsString("protected static ?int \$navigationSort = 14", $page);
