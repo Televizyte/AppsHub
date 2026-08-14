@@ -1,5 +1,7 @@
 <x-filament-panels::page>
-    @php($focusedEditorRoute = request()->routeIs('admin.video-engine.*'))
+    @php
+        $focusedEditorRoute = request()->routeIs('admin.video-engine.*');
+    @endphp
     <style>
         [x-cloak] { display: none !important; }
         .ve-shell { display: flex; flex-direction: column; gap: 12px; }

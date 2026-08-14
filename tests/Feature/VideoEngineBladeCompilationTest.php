@@ -50,10 +50,16 @@ class VideoEngineBladeCompilationTest extends TestCase
         $this->assertNotEmpty($videoEngineViews, 'The cached Video Engine Blade output was not found.');
 
         foreach ($videoEngineViews as $compiled) {
+            $compiledPhp = (string) file_get_contents($compiled);
             $output = [];
             $exitCode = 1;
             exec(escapeshellarg(PHP_BINARY) . ' -l ' . escapeshellarg($compiled), $output, $exitCode);
 
+            $this->assertStringContainsString(
+                "\$focusedEditorRoute = request()->routeIs('admin.video-engine.*');",
+                $compiledPhp,
+            );
+            $this->assertStringNotContainsString('<?php($focusedEditorRoute', $compiledPhp);
             $this->assertSame(0, $exitCode, $compiled . PHP_EOL . implode(PHP_EOL, $output));
         }
     }
