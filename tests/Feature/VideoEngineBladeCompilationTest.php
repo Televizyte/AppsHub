@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use Illuminate\Support\Facades\Artisan;
 use Tests\TestCase;
 
 class VideoEngineBladeCompilationTest extends TestCase
@@ -26,6 +27,34 @@ class VideoEngineBladeCompilationTest extends TestCase
             exec(escapeshellarg(PHP_BINARY) . ' -l ' . escapeshellarg($compiled), $output, $exitCode);
 
             $this->assertSame(0, $exitCode, $view . PHP_EOL . implode(PHP_EOL, $output));
+        }
+    }
+
+    public function test_view_cache_produces_valid_video_engine_compiled_php(): void
+    {
+        $this->assertSame(0, Artisan::call('view:clear'));
+        $this->assertSame(0, Artisan::call('view:cache'), Artisan::output());
+
+        $compiledViews = glob(storage_path('framework/views/*.php')) ?: [];
+        $videoEngineViews = array_values(array_filter(
+            $compiledViews,
+            fn (string $path): bool => str_contains(
+                (string) file_get_contents($path),
+                'resources\\views\\filament\\pages\\video-engine.blade.php'
+            ) || str_contains(
+                (string) file_get_contents($path),
+                'resources/views/filament/pages/video-engine.blade.php'
+            ),
+        ));
+
+        $this->assertNotEmpty($videoEngineViews, 'The cached Video Engine Blade output was not found.');
+
+        foreach ($videoEngineViews as $compiled) {
+            $output = [];
+            $exitCode = 1;
+            exec(escapeshellarg(PHP_BINARY) . ' -l ' . escapeshellarg($compiled), $output, $exitCode);
+
+            $this->assertSame(0, $exitCode, $compiled . PHP_EOL . implode(PHP_EOL, $output));
         }
     }
 }

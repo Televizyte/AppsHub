@@ -492,8 +492,10 @@
         @endif
     </div>
 
-    @script
-    <script>
+</x-filament-panels::page>
+
+@script
+<script>
         Alpine.data('videoEngineWorkspace', () => ({
             uploading: false,
             uploadMessage: '',
@@ -543,6 +545,5 @@
                 finally { this.uploading = false; }
             },
         }));
-    </script>
-    @endscript
-</x-filament-panels::page>
+</script>
+@endscript
