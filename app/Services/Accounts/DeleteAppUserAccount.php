@@ -37,6 +37,13 @@ class DeleteAppUserAccount
                 'watch_events',
             ];
 
+            if (Schema::hasTable('content_post_saves')) {
+                $deleted['content_post_saves'] = DB::table('content_post_saves')
+                    ->where('app_id', $appId)
+                    ->where('user_id', $userId)
+                    ->delete();
+            }
+
             foreach ($simpleTables as $table) {
                 if (! Schema::hasTable($table)
                     || ! Schema::hasColumn($table, 'app_id')
@@ -113,6 +120,14 @@ class DeleteAppUserAccount
             'quiz_user_progress',
             'watch_events',
         ];
+
+        if (Schema::hasTable('content_post_saves')
+            && DB::table('content_post_saves')
+                ->where('user_id', $userId)
+                ->where('app_id', '<>', $excludedAppId)
+                ->exists()) {
+            return true;
+        }
 
         foreach ($tables as $table) {
             if (! Schema::hasTable($table)
